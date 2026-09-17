@@ -1,0 +1,139 @@
+@inherits LayoutComponentBase
+@page "/boards"
+@using core.Models
+@attribute [Authorize]
+
+@inject HttpClient http
+@inject DialogService DialogService
+@inject IExceptionHandler ExceptionHandler
+@inject IAccessTokenProvider accessTokenProvider;
+@inject IAccessTokenProvider AuthorizationService
+@inject NotificationService NotificationService;
+
+
+<RadzenStack Gap="1rem">
+    <RadzenText TextStyle="TextStyle.H4">Boards</RadzenText>
+
+    <RadzenDataGrid @ref="boardsGrid" Data="@boards" TItem="Board" AllowFiltering="true" AllowPaging="true"
+                    AllowSorting="true" PageSize="10" ColumnWidth="200px">
+        <HeaderTemplate>
+            <RadzenButton ButtonStyle="ButtonStyle.Success" Icon="add_circle" Text="Add New Board"
+                          Click="@OpenAddDialog" />
+        </HeaderTemplate>
+        <Columns>
+            <RadzenDataGridColumn Property="@nameof(Board.Name)" Title="Name">
+            </RadzenDataGridColumn>
+
+            <RadzenDataGridColumn Property="@nameof(Board.Description)" Title="Description">
+            </RadzenDataGridColumn>
+
+            <RadzenDataGridColumn Property="@nameof(Board.Length)" Title="Length" Width="150px">
+            </RadzenDataGridColumn>
+
+            <RadzenDataGridColumn Property="@nameof(Board.Width)" Title="Width" Width="150px">
+            </RadzenDataGridColumn>
+
+            <RadzenDataGridColumn Context="board" Filterable="false" Sortable="false" TextAlign="TextAlign.Right"
+                                  Frozen="true" FrozenPosition="FrozenColumnPosition.Right" Width="100px">
+                <Template Context="board">
+                    <RadzenButton Icon="edit" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                                  Size="ButtonSize.Medium" Click="@(() => OpenEditDialog(board))" aria-label="Edit board" />
+                    <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Flat"
+                                  Size="ButtonSize.Medium" Click="@(() => DeleteRow(board))" aria-label="Delete board" />
+                </Template>
+            </RadzenDataGridColumn>
+        </Columns>
+    </RadzenDataGrid>
+</RadzenStack>
+
+@code {
+
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthenticationState { get; set; }
+    private RadzenDataGrid<Board> boardsGrid;
+    private IList<Board> boards = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadBoards();
+    }
+
+    private async Task LoadBoards()
+    {
+        try
+        {
+            boards = await http.GetFromJsonAsync<List<Board>>("boards") ?? [];
+        }
+        catch (Exception exception)
+        {
+            await ExceptionHandler.HandleAsync(exception, "Components", "load components");
+        }
+    }
+
+    private async Task OpenAddDialog()
+    {
+        var result = await DialogService.OpenAsync<BoardDialog>("Add New Board", new Dictionary<string, object>(), new
+        DialogOptions
+        {
+            Width = "500px",
+            Resizable = false,
+            Draggable = true,
+            CloseDialogOnOverlayClick = false
+        });
+
+        if (result is Board)
+        {
+            boards = await http.GetFromJsonAsync<List<Board>>("boards") ?? [];
+            await boardsGrid.Reload();
+        }
+    }
+
+    private async Task OpenEditDialog(Board board)
+    {
+        var result = await DialogService.OpenAsync<BoardDialog>("Edit Board", new Dictionary<string, object>
+        {
+            ["InitialBoard"] = board
+        }, new DialogOptions
+        {
+            Width = "500px",
+            Resizable = false,
+            Draggable = true,
+            CloseDialogOnOverlayClick = false
+        });
+
+        if (result is Board)
+        {
+            boards = await http.GetFromJsonAsync<List<Board>>("boards") ?? [];
+            await boardsGrid.Reload();
+        }
+    }
+
+    private async Task DeleteRow(Board board)
+    {
+        var confirmed = await DialogService.Confirm($"Delete board '{board.Name}'?", "Delete board", new ConfirmOptions
+        {
+            OkButtonText = "Delete",
+            CancelButtonText = "Cancel"
+        });
+        if (confirmed != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var response = await http.DeleteAsync($"boards/{board.Id}");
+            response.EnsureSuccessStatusCode();
+
+            boards.Remove(board);
+            if (boardsGrid is not null)
+            {
+                await boardsGrid.Reload();
+            }
+        }
+        catch (Exception exception)
+        {
+            await ExceptionHandler.HandleAsync(exception, "Boards", "delete board");
+        }
+    }
+}

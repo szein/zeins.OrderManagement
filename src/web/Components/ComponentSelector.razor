@@ -1,0 +1,98 @@
+@typeparam TItem
+@typeparam TKey
+
+<RadzenStack Gap="0.75rem">
+	<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.75rem">
+		<RadzenDropDown TValue="TKey" @bind-Value="selectedKey" Data="AvailableItems"
+						TextProperty="@TextProperty" ValueProperty="@ValueProperty"
+						Placeholder="@Placeholder" Style="width:60%" />
+		<RadzenNumeric TValue="int" @bind-Value="quantityToAdd" Min="1"
+					   Max="@(Math.Max(1, SelectedItem is null ? 1 : AvailableQuantity(SelectedItem)))"
+					   Name="ComponentQuantity" Style="width:8rem" />
+		<RadzenButton Text="Add" Icon="add" ButtonStyle="ButtonStyle.Primary"
+					  Click="AddItem" Disabled="!CanAddItem" />
+	</RadzenStack>
+
+	@if (SelectedItem is not null && AvailableQuantity(SelectedItem) == 0)
+	{
+		<RadzenText Text="This component is out of stock."
+					Style="color: var(--rz-danger);" />
+	}
+
+	<RadzenStack Gap="0.5rem">
+		<RadzenText Text="Added components" TextStyle="TextStyle.Subtitle2" />
+		@if (SelectedItems.Count == 0)
+		{
+			<RadzenText Text="No components added yet." TextStyle="TextStyle.Caption" />
+		}
+		@foreach (var item in SelectedItems)
+		{
+			<RadzenCard>
+				<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center">
+					<RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Text"
+								  Size="ButtonSize.Small" Click="@(() => RemoveItem(ItemKeySelector(item)))" />
+					<RadzenStack Gap="0.15rem">
+						<RadzenText Text="@ItemText(item)" TextStyle="TextStyle.Body1" />
+						<RadzenText Text="@($"Quantity: {QuantitySelector(item)}")" TextStyle="TextStyle.Caption" />
+					</RadzenStack>
+				</RadzenStack>
+			</RadzenCard>
+		}
+	</RadzenStack>
+</RadzenStack>
+
+@code {
+	[Parameter, EditorRequired] public IEnumerable<TItem> Items { get; set; } = [];
+	[Parameter, EditorRequired] public IList<TItem> SelectedItems { get; set; } = [];
+	[Parameter, EditorRequired] public Func<TItem, TKey> ItemKeySelector { get; set; } = default!;
+	[Parameter, EditorRequired] public Func<TItem, string> ItemText { get; set; } = default!;
+	[Parameter, EditorRequired] public Func<TItem, int> QuantitySelector { get; set; } = default!;
+	[Parameter, EditorRequired] public Func<TItem, int> AvailableQuantity { get; set; } = default!;
+	[Parameter, EditorRequired] public Func<TItem, int, TItem> CreateSelectedItem { get; set; } = default!;
+	[Parameter, EditorRequired] public string TextProperty { get; set; } = string.Empty;
+	[Parameter, EditorRequired] public string ValueProperty { get; set; } = string.Empty;
+	[Parameter] public string Placeholder { get; set; } = "Select a component";
+	[Parameter] public EventCallback<IList<TItem>> SelectedItemsChanged { get; set; }
+
+	private TKey selectedKey = default!;
+	private int quantityToAdd = 1;
+
+	private IEnumerable<TItem> AvailableItems => Items.Where(item => SelectedItems.All(selected =>
+		!EqualityComparer<TKey>.Default.Equals(ItemKeySelector(selected), ItemKeySelector(item))));
+
+	private TItem SelectedItem => Items.FirstOrDefault(item =>
+		EqualityComparer<TKey>.Default.Equals(ItemKeySelector(item), selectedKey));
+
+	private bool CanAddItem => SelectedItem is not null
+		&& AvailableQuantity(SelectedItem) > 0
+		&& quantityToAdd > 0
+		&& quantityToAdd <= AvailableQuantity(SelectedItem);
+
+	private async Task AddItem()
+	{
+		if (!CanAddItem || SelectedItem is null)
+		{
+			return;
+		}
+
+		var updatedItems = SelectedItems.ToList();
+		updatedItems.Add(CreateSelectedItem(SelectedItem, quantityToAdd));
+		await UpdateSelectedItems(updatedItems);
+		selectedKey = default!;
+		quantityToAdd = 1;
+	}
+
+	private async Task RemoveItem(TKey key)
+	{
+		var updatedItems = SelectedItems
+			.Where(item => !EqualityComparer<TKey>.Default.Equals(ItemKeySelector(item), key))
+			.ToList();
+		await UpdateSelectedItems(updatedItems);
+	}
+
+	private async Task UpdateSelectedItems(IList<TItem> updatedItems)
+	{
+		SelectedItems = updatedItems;
+		await SelectedItemsChanged.InvokeAsync(updatedItems);
+	}
+}

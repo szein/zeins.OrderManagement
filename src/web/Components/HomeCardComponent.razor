@@ -1,0 +1,107 @@
+@using core.Models
+@inject HttpClient Http
+
+<RadzenStack class="rz-p-0 rz-p-md-12">
+    @if (isLoading)
+    {
+        <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" />
+    }
+    else if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <RadzenText Text="@errorMessage" Style="color: var(--rz-danger);" />
+    }
+    else
+    {
+        <RadzenCardGroup Responsive="true">
+            <RadzenCard Variant="Variant.Filled">
+                <RadzenStack JustifyContent="JustifyContent.SpaceBetween" Gap="1rem">
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Start"
+                                 JustifyContent="JustifyContent.SpaceBetween">
+                        <RadzenText TextStyle="TextStyle.H6" TagName="TagName.P">Created Orders</RadzenText>
+                        <RadzenText TextStyle="TextStyle.H2" TagName="TagName.P" class="rz-m-0">@createdOrders</RadzenText>
+                    </RadzenStack>
+                    <RadzenProgressBar Value="@createdProgress" ShowValue="false"
+                                       Style="--rz-progressbar-height: 1rem;" />
+                </RadzenStack>
+            </RadzenCard>
+            <RadzenCard Variant="Variant.Filled">
+                <RadzenStack JustifyContent="JustifyContent.SpaceBetween" Gap="1rem">
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Start"
+                                 JustifyContent="JustifyContent.SpaceBetween">
+                        <RadzenText TextStyle="TextStyle.H6" TagName="TagName.P">Completed Orders</RadzenText>
+                        <RadzenText TextStyle="TextStyle.H2" TagName="TagName.P" class="rz-m-0">@completedOrders</RadzenText>
+                    </RadzenStack>
+                    <RadzenProgressBar Value="@completedProgress" ShowValue="false"
+                                       Style="--rz-progressbar-height: 1rem;" />
+                </RadzenStack>
+            </RadzenCard>
+            <RadzenCard Variant="Variant.Filled">
+                <RadzenStack JustifyContent="JustifyContent.SpaceBetween" Gap="1rem">
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Start"
+                                 JustifyContent="JustifyContent.SpaceBetween">
+                        <RadzenText TextStyle="TextStyle.H6" TagName="TagName.P">Pending Orders</RadzenText>
+                        <RadzenText TextStyle="TextStyle.H2" TagName="TagName.P" class="rz-m-0">@pendingOrders</RadzenText>
+                    </RadzenStack>
+                    <RadzenProgressBar Value="@pendingProgress" ShowValue="false"
+                                       Style="--rz-progressbar-height: 1rem;" />
+                </RadzenStack>
+            </RadzenCard>
+            <RadzenCard Variant="Variant.Filled">
+                <RadzenStack JustifyContent="JustifyContent.SpaceBetween" Gap="1rem">
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Start"
+                                 JustifyContent="JustifyContent.SpaceBetween">
+                        <RadzenText TextStyle="TextStyle.H6" TagName="TagName.P">Cancelled Orders</RadzenText>
+                        <RadzenText TextStyle="TextStyle.H2" TagName="TagName.P" class="rz-m-0">@cancelledOrders</RadzenText>
+                    </RadzenStack>
+                    <RadzenProgressBar Value="@cancelledProgress" ShowValue="false"
+                                       Style="--rz-progressbar-height: 1rem;" />
+                </RadzenStack>
+            </RadzenCard>
+        </RadzenCardGroup>
+    }
+</RadzenStack>
+
+@code {
+    private int createdOrders;
+    private int completedOrders;
+    private int pendingOrders;
+    private int cancelledOrders;
+    private double createdProgress;
+    private double completedProgress;
+    private double pendingProgress;
+    private double cancelledProgress;
+    private bool isLoading = true;
+    private string errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var orders = await Http.GetFromJsonAsync<List<Order>>("orders") ?? [];
+            var totalOrders = orders.Count;
+
+            createdOrders = orders.Count(order => order.Status == OrderStatus.Created);
+            completedOrders = orders.Count(order => order.Status == OrderStatus.Completed);
+            pendingOrders = orders.Count(order => order.Status == OrderStatus.Pending);
+            cancelledOrders = orders.Count(order => order.Status == OrderStatus.Cancelled);
+
+            createdProgress = GetPercentage(createdOrders, totalOrders);
+            completedProgress = GetPercentage(completedOrders, totalOrders);
+            pendingProgress = GetPercentage(pendingOrders, totalOrders);
+            cancelledProgress = GetPercentage(cancelledOrders, totalOrders);
+        }
+        catch (HttpRequestException)
+        {
+            errorMessage = "Unable to load order statistics.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private static double GetPercentage(int count, int total)
+    {
+        return total == 0 ? 0 : count * 100d / total;
+    }
+}

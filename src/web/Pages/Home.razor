@@ -1,0 +1,12 @@
+﻿@page "/"
+<PageTitle>Home</PageTitle>
+
+<AuthorizeView>
+    <Authorized>
+        <HomeCardComponent />
+    </Authorized>
+    <NotAuthorized>
+        <RadzenText TextStyle="TextStyle.H4">Please log in to continue.</RadzenText>
+    </NotAuthorized>
+</AuthorizeView>
+

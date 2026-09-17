@@ -1,0 +1,21 @@
+﻿<RadzenSidebar Position="SidebarPosition.Left" @bind-Expanded="@SidebarExpanded" Style="width: 200px;">
+            <RadzenPanelMenu class="sidebar-panel-menu">
+                <RadzenPanelMenuItem Text="Home" Path="/" Icon="home" />
+                <AuthorizeView>
+                    <Authorized>
+                        <RadzenPanelMenuItem Text="Orders" Path="orders" Icon="receipt_long" />
+
+                        <RadzenPanelMenuItem Text="Management" Icon="settings" class="management-menu-item">
+                            <RadzenPanelMenuItem Text="Boards" Path="boards" Icon="developer_board" />
+                            <RadzenPanelMenuItem Text="Components" Path="components" Icon="memory" />
+                        </RadzenPanelMenuItem>
+                    </Authorized>
+                </AuthorizeView>
+                
+            </RadzenPanelMenu>
+        </RadzenSidebar>
+@code
+{
+    [Parameter]
+    public bool SidebarExpanded {get; set;}
+}

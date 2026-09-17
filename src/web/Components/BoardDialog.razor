@@ -1,0 +1,106 @@
+@using core.Models
+@using Radzen.Blazor
+@inject HttpClient http
+@inject DialogService DialogService
+@inject IExceptionHandler ExceptionHandler
+
+<RadzenTemplateForm TItem="Board" Data="board" Submit="@Save">
+    <RadzenStack Gap="1rem">
+        <RadzenFormField Name="BoardName" Text="Name" Variant="Variant.Outlined">
+            <RadzenTextBox @bind-Value="board.Name" Name="BoardName" Placeholder="Board name" Style="width:100%" />
+        </RadzenFormField>
+        <RadzenRequiredValidator Component="BoardName" Text="Name is required" />
+
+        <RadzenFormField Text="Description" Variant="Variant.Outlined">
+            <RadzenTextArea @bind-Value="board.Description" Name="BoardDescription" Placeholder="Description"
+                            Style="width:100%" />
+        </RadzenFormField>
+        
+        <RadzenFormField Name="BoardLength" Text="Length" Variant="Variant.Outlined" Style="flex:1">
+            <ChildContent>
+                <RadzenNumeric TValue="decimal" @bind-Value="length" Name="BoardLength" Placeholder="Length" Min="0.01m" Style="width:100%" />            </ChildContent>
+            <End>
+                <RadzenChip Text="mm" Variant="Variant.Outlined" ChipStyle="BadgeStyle.Base" />
+            </End>
+        </RadzenFormField>
+
+        <RadzenNumericRangeValidator Component="BoardLength" Min="0.01" Text="Length must be greater than zero"/>
+
+        
+        <RadzenFormField Name="BoardWidth" Text="Width" Variant="Variant.Outlined" Style="flex:1">
+            <ChildContent>
+                <RadzenNumeric TValue="decimal" @bind-Value="width" Name="BoardWidth" Placeholder="Width" Min="0.01m" Style="width:100%" />
+            </ChildContent>
+            <End>
+                <RadzenChip Text="mm" Variant="Variant.Outlined" ChipStyle="BadgeStyle.Base" />
+            </End>
+        </RadzenFormField>
+
+        <RadzenNumericRangeValidator Component="BoardWidth" Min="0.01" Text="Width must be greater than zero"
+                                     />
+
+        <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" Gap="0.5rem">
+            <RadzenButton Text="Cancel" Icon="close" ButtonStyle="ButtonStyle.Light" Click="@Cancel" />
+            <RadzenButton Text="Save" Icon="save" ButtonStyle="ButtonStyle.Primary" ButtonType="ButtonType.Submit" />
+        </RadzenStack>
+    </RadzenStack>
+</RadzenTemplateForm>
+
+@code {
+    [Parameter]
+    public Board InitialBoard { get; set; }
+
+    private Board board = new();
+    private decimal length;
+    private decimal width;
+
+    protected override void OnInitialized()
+    {
+        board = InitialBoard is null
+            ? new Board()
+            : new Board
+            {
+                Id = InitialBoard.Id,
+                Name = InitialBoard.Name,
+                Description = InitialBoard.Description,
+                Length = InitialBoard.Length,
+                Width = InitialBoard.Width
+            };
+        length = (decimal)board.Length;
+        width = (decimal)board.Width;
+    }
+
+    private async Task Save(Board value)
+    {
+        board.Length = (double)length;
+        board.Width = (double)width;
+
+        try
+        {
+            var payload = new
+            {
+                board.Name,
+                board.Description,
+                board.Length,
+                board.Width
+            };
+            var response = board.Id == 0
+                ? await http.PostAsJsonAsync("boards", payload)
+                : await http.PutAsJsonAsync($"boards/{board.Id}", payload);
+            response.EnsureSuccessStatusCode();
+
+            var savedBoard = await response.Content.ReadFromJsonAsync<Board>();
+            DialogService.Close(savedBoard ?? board);
+        }
+        catch (Exception exception)
+        {
+            var operation = board.Id == 0 ? "create" : "update";
+            await ExceptionHandler.HandleAsync(exception, "Boards", $"{operation} board");
+        }
+    }
+
+    private void Cancel()
+    {
+        DialogService.Close();
+    }
+}

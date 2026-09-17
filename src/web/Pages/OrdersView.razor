@@ -1,0 +1,305 @@
+@inherits LayoutComponentBase
+@page "/orders"
+@using core.Models;
+
+@attribute [Authorize]
+@inject HttpClient http;
+@inject DialogService DialogService;
+@inject IExceptionHandler ExceptionHandler
+@inject IJSRuntime JS
+
+<style>
+    .wrap-cell {
+        white-space: normal !important;
+        word-break: break-word !important;
+    }
+</style>
+
+
+<RadzenDataGrid @ref="ordersGrid"
+AllowAlternatingRows="false"
+AllowFiltering="true"
+AllowPaging="true"
+PageSize="20"
+AllowSorting="true"
+ExpandMode="DataGridExpandMode.Multiple"
+RowExpand="@LoadBoards"
+SelectionMode="DataGridSelectionMode.Single"
+RowSelect="@OnOrderSelected"
+EditMode="@editMode"
+Data="@orders" TItem="Order" RowUpdate="@OnUpdateRow" Sort="@Reset" Page="@Reset" Filter="@Reset" ColumnWidth="200px">
+    <HeaderTemplate>
+        <RadzenButton ButtonStyle="ButtonStyle.Success" Icon="add_circle" Text="Add New Order" Click="@OpenOrderWizard" />
+    </HeaderTemplate>
+    <Template Context="order">
+        <RadzenDataGrid Data="@GetBoards(order)" TItem="OrderBoardRow"
+                        AllowPaging="true" PageSize="10" AllowSorting="true"
+                        ExpandMode="DataGridExpandMode.Single"
+                        RowExpand="@(board => LoadComponents(order, board))" ColumnWidth="150px">
+            <Template Context="board">
+                    <RadzenDataGrid Data="@GetComponents(order, board)" TItem="BoardComponentRow"
+                                AllowPaging="true" PageSize="10" AllowSorting="true" ColumnWidth="150px">
+                    <Columns>
+                        <RadzenDataGridColumn Property="@nameof(BoardComponentRow.ComponentTypeName)" Title="Type" />
+                        <RadzenDataGridColumn Property="@nameof(BoardComponentRow.Quantity)" Title="Quantity" />
+                    </Columns>
+                </RadzenDataGrid>
+            </Template>
+            <Columns>
+                <RadzenDataGridColumn Property="@nameof(OrderBoardRow.Name)" Title="Name" />
+                <RadzenDataGridColumn Property="@nameof(OrderBoardRow.Description)" Title="Description" Width="300px" CssClass="wrap-cell" />
+                <RadzenDataGridColumn Property="@nameof(OrderBoardRow.Length)" Title="Length" />
+                <RadzenDataGridColumn Property="@nameof(OrderBoardRow.Width)" Title="Width" />
+            </Columns>
+        </RadzenDataGrid>
+    </Template>
+    <Columns>
+        
+        @* Name *@
+        <RadzenDataGridColumn Property="@nameof(Order.Name)" Title="Name">
+            <EditTemplate Context="order">
+                <RadzenTextBox @bind-Value="order.Name" Style="width:200px; display: block" Name="Name" aria-label="Enter order name" />
+            </EditTemplate>
+        </RadzenDataGridColumn>
+        @* Description *@
+        <RadzenDataGridColumn Property="@nameof(Order.Description)" Title="Description">
+            <EditTemplate Context="order">
+                <RadzenTextBox @bind-Value="order.Description" Style="width:200px; display: block" Name="Description" aria-label="Enter order description" />
+            </EditTemplate>
+        </RadzenDataGridColumn>
+        @* Order Date *@
+        <RadzenDataGridColumn Property="@nameof(Order.OrderDate)" Title="Order Date" Width="200px">
+            <Template Context="order">
+                @String.Format("{0:d}", order.OrderDate)
+            </Template>
+            <EditTemplate Context="order">
+                <RadzenDatePicker @bind-Value="order.OrderDate" Style="width:100%" InputAttributes="@(new Dictionary<string,object>(){ { "aria-label", "Select order date" }})" />
+            </EditTemplate>
+        </RadzenDataGridColumn>
+
+        <RadzenDataGridColumn Property="@nameof(Order.Name)" Title="Status">
+            <Template Context="order">
+                @* <RadzenTextBox @bind-Value="order.Name" Style="width:200px; display: block" Name="Name" aria-label="Enter order name" /> *@
+                <RadzenChip Text="@(order.Status.ToString())" ChipStyle="@GetOrderStatusChipStyle(order.Status)" />
+            </Template>
+        </RadzenDataGridColumn>
+        
+                
+        <RadzenDataGridColumn Context="order" Filterable="false" Sortable="false" TextAlign="TextAlign.Right" Frozen="true" FrozenPosition="FrozenColumnPosition.Right">
+            <Template Context="order">
+                <RadzenButton Icon="download" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat" Size="ButtonSize.Medium" class="rz-my-1 rz-ms-1" Click="@(args => DownloadOrder(order))" @onclick:stopPropagation="true" />
+                <RadzenButton Icon="edit" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat" Size="ButtonSize.Medium" class="rz-my-1 rz-ms-1" Click="@(args => EditOrder(order))" @onclick:stopPropagation="true" />
+                <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Flat" Size="ButtonSize.Medium" Shade="Shade.Lighter" class="rz-my-1 rz-ms-1" Click="@(args => DeleteOrder(order))" @onclick:stopPropagation="true" />
+            </Template>
+            <EditTemplate Context="order">
+                <RadzenButton Icon="check" ButtonStyle="ButtonStyle.Success" Variant="Variant.Flat" Size="ButtonSize.Medium" Click="@((args) => SaveRow(order))" aria-label="Save"/>
+                <RadzenButton Icon="close" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat" Size="ButtonSize.Medium" class="rz-my-1 rz-ms-1" Click="@((args) => CancelEdit(order))" aria-label="Cancel"/>
+                <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Flat" Size="ButtonSize.Medium" Shade="Shade.Lighter" class="rz-my-1 rz-ms-1" Click="@(args => DeleteOrder(order))" aria-label="Delete" />
+            </EditTemplate>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+@code {
+    private sealed record OrderBoardRow(Guid OrderBoardId, int BoardId, string Name, string Description, double Length, double Width);
+    private sealed record BoardComponentRow(int ComponentId, string ComponentTypeName, int Quantity, ComponentStatus Status);
+
+    private readonly Dictionary<Guid, IList<OrderBoardRow>> boardsByOrder = new();
+    private readonly Dictionary<(Guid OrderId, Guid OrderBoardId), IList<BoardComponentRow>> componentsByBoard = new();
+    
+    private RadzenDataGrid<Order> ordersGrid;
+    private IEnumerable<Order> orders;
+    private Order selectedOrder;
+    
+
+    private DataGridEditMode editMode = DataGridEditMode.Single;
+    private List<Order> ordersToUpdate = new List<Order>();
+    
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadOrders();
+    }
+
+    private async Task LoadOrders()
+    {
+        try
+        {
+            orders = await http.GetFromJsonAsync<List<Order>>("orders") ?? new List<Order>();
+        }
+        catch (Exception exception)
+        {
+            await ExceptionHandler.HandleAsync(exception, "Orders", "load orders");
+        }
+    }
+
+    private async Task LoadBoards(Order order)
+    {
+        try
+        {
+            if (!boardsByOrder.ContainsKey(order.Id))
+            {
+                boardsByOrder[order.Id] = await http.GetFromJsonAsync<List<OrderBoardRow>>($"orders/{order.Id}/boards") ?? [];
+            }
+        }
+        catch (Exception exception)
+        {
+            await ExceptionHandler.HandleAsync(exception, "Orders", "load order boards");
+        }
+    }
+    
+    private async Task LoadComponents(Order order, OrderBoardRow board)
+    {
+        try
+        {
+            var key = (order.Id, board.OrderBoardId);
+            if (!componentsByBoard.ContainsKey(key))
+            {
+                componentsByBoard[key] = await http.GetFromJsonAsync<List<BoardComponentRow>>(
+                    $"orders/{order.Id}/boards/{board.OrderBoardId}/components") ?? [];
+            }
+        }
+        catch (Exception exception)
+        {
+            await ExceptionHandler.HandleAsync(exception, "Orders", "load board components");
+        }
+    }
+
+    private IList<OrderBoardRow> GetBoards(Order order) =>
+        boardsByOrder.TryGetValue(order.Id, out var boards) ? boards : [];
+
+    private IList<BoardComponentRow> GetComponents(Order order, OrderBoardRow board) =>
+        componentsByBoard.TryGetValue((order.Id, board.OrderBoardId), out var components) ? components : [];
+
+    
+
+    void Reset()
+    {
+        ordersToUpdate.Clear();
+    }
+
+    void Reset(Order order)
+    {
+        ordersToUpdate.Remove(order);
+    }
+
+    async Task OpenOrderWizard()
+    {
+        var result = await DialogService.OpenAsync<OrderWizard>("Add New Order", new Dictionary<string, object>(), new DialogOptions
+        {
+            Width = "900px",
+            Resizable = true,
+            Draggable = true,
+            CloseDialogOnOverlayClick = false
+        });
+
+        if (result is Order)
+        {
+            try
+            {
+                orders = await http.GetFromJsonAsync<List<Order>>("orders") ?? [];
+                await ordersGrid.Reload();
+            }
+            catch (Exception exception)
+            {
+                await ExceptionHandler.HandleAsync(exception, "Orders", "refresh orders");
+            }
+        }
+    }
+
+    async Task EditOrder(Order order)
+    {
+        if (!ordersGrid.IsValid) return;
+
+        if (editMode == DataGridEditMode.Single)
+        {
+            Reset();
+        }
+
+        ordersToUpdate.Add(order);
+        await ordersGrid.EditRow(order);
+    }
+
+    void OnUpdateRow(Order order)
+    {
+        Reset(order);
+    }
+
+    async Task SaveRow(Order order)
+    {
+        await ordersGrid.UpdateRow(order);
+    }
+
+    void CancelEdit(Order order)
+    {
+        Reset(order);
+
+        ordersGrid.CancelEditRow(order);
+    }
+
+    async Task DeleteOrder(Order order)
+    {
+        Reset(order);
+
+        var confirmed = await DialogService.Confirm($"Delete Order '{order.Name}'?", "Delete Order", new ConfirmOptions
+        {
+            OkButtonText = "Delete",
+            CancelButtonText = "Cancel"
+        });
+        if (confirmed != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var response = await http.DeleteAsync($"orders/{order.Id}");
+            response.EnsureSuccessStatusCode();
+            
+            if (ordersGrid is not null)
+            {
+                await ordersGrid.Reload();
+            }
+        }
+        catch (Exception exception)
+        {
+            await ExceptionHandler.HandleAsync(exception, "Orders", "delete order");
+        }
+    }
+
+    async Task DownloadOrder(Order order)
+    {
+        try
+        {
+            var orderData = await http.GetFromJsonAsync<OrderExportResponse>($"orders/{order.Id}/export");
+            if (orderData is null)
+            {
+                return;
+            }
+
+            var json = System.Text.Json.JsonSerializer.Serialize(orderData, new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+
+            await JS.InvokeVoidAsync("downloadJsonFile", $"order-{order.Id}.json", json);
+        }
+        catch (Exception exception)
+        {
+            await ExceptionHandler.HandleAsync(exception, "Orders", "download order");
+        }
+    }
+    
+    void OnOrderSelected(Order selectedItem)
+    {
+        selectedOrder = selectedItem;
+    }
+
+    BadgeStyle GetOrderStatusChipStyle(OrderStatus status) => status switch
+    {
+        OrderStatus.Completed => BadgeStyle.Success, // Green
+        OrderStatus.Cancelled => BadgeStyle.Danger,  // Red
+        OrderStatus.Pending   => BadgeStyle.Warning, // Yellow/Orange
+        OrderStatus.Created   => BadgeStyle.Info,    // Blue
+        _           => BadgeStyle.Primary  // Default blue
+    };
+}

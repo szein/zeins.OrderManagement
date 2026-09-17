@@ -1,0 +1,47 @@
+﻿@inherits LayoutComponentBase
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@using Radzen.Blazor
+@using WebApp.Auth
+@inject NavigationManager Navigation
+
+<HeadContent>
+    <RadzenTheme Theme="material" />
+</HeadContent>
+
+<RadzenLayout>
+    <RadzenHeader>
+        <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween" AlignItems="AlignItems.Center" Gap="0">
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0">
+                <RadzenSidebarToggle Click="@(() => leftSidebarExpanded = !leftSidebarExpanded)" />
+                <RadzenLabel Text="Header" />
+            </RadzenStack>
+            <RadzenStack Orientation="Orientation.Horizontal" Gap="0.75">
+                <Login />
+            </RadzenStack>
+        </RadzenStack>
+
+    </RadzenHeader>
+    <NavMenu SidebarExpanded=@leftSidebarExpanded/>
+    <RadzenBody>
+        <div class="rz-p-4">
+            <ErrorBoundary @ref="_errorBoundary">
+                <ChildContent>
+                    @Body
+                </ChildContent>
+                <ErrorContent>
+                    An Error occurred.
+                </ErrorContent>
+            </ErrorBoundary>
+        </div>
+    </RadzenBody>
+</RadzenLayout>
+
+<RadzenComponents />
+
+@code {
+#nullable disable
+    ErrorBoundary _errorBoundary;
+    bool leftSidebarExpanded = true;
+    
+}

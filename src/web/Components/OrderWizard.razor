@@ -1,0 +1,221 @@
+@using core.Models
+@using Radzen.Blazor
+@inject HttpClient http
+@inject DialogService DialogService
+@inject IExceptionHandler ExceptionHandler
+
+<RadzenSteps ShowStepsButtons="false" @bind-SelectedIndex="wizardStep">
+    <Steps>
+        <RadzenStepsItem Text="Order details">
+            <RadzenTemplateForm TItem="Order" Data="newOrder">
+                <RadzenStack Gap="1rem">
+                    <RadzenTextBox @bind-Value="newOrder.Name" Name="OrderName" Placeholder="Order name"
+                                   Style="width:100%" />
+                    <RadzenTextArea @bind-Value="newOrder.Description" Name="OrderDescription" Placeholder="Description"
+                                    Style="width:100%" />
+                    <RadzenDatePicker @bind-Value="newOrder.OrderDate" Name="OrderDate" ReadOnly="true"
+                                      Style="width:100%" />
+                </RadzenStack>
+            </RadzenTemplateForm>
+        </RadzenStepsItem>
+        <RadzenStepsItem Text="Boards">
+            <RadzenStack Gap="0.5rem">
+                <ItemSelector TItem="Board" TKey="int" Items="boards" SelectedItems="selectedBoards"
+                              SelectedItemsChanged="OnBoardsChanged"
+                              ItemKeySelector="board => board.Id" ItemText="board => board.Name" TextProperty="Name"
+                              ValueProperty="Id" KeepSelectedItemsInDropdown="true" Placeholder="Select a board" />
+            </RadzenStack>
+        </RadzenStepsItem>
+        <RadzenStepsItem Text="Components">
+            <RadzenDropDown TValue="int" @bind-Value="selectedBoardInstanceId" Data="selectedBoardInstances"
+                            TextProperty="Name" ValueProperty="InstanceId" Placeholder="Select a board"
+                            Style="width:100%; margin-bottom:1rem" />
+            <ComponentSelector TItem="ComponentSelectorItem" TKey="int"
+                               Items="selectorComponents" SelectedItems="SelectedComponentsForBoard"
+                               SelectedItemsChanged="items => SelectedComponentsForBoard = items"
+                               ItemKeySelector="component => component.Id"
+                               ItemText="component => component.Name"
+                               QuantitySelector="component => component.Quantity"
+                               AvailableQuantity="component => AvailableQuantity(component.Id)"
+                               CreateSelectedItem="(component, quantity) => component with { Quantity = quantity }"
+                               TextProperty="Name" ValueProperty="Id" />
+        </RadzenStepsItem>
+    </Steps>
+</RadzenSteps>
+
+<RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween" class="rz-mt-4">
+    <RadzenButton Text="Cancel" Icon="close" ButtonStyle="ButtonStyle.Light" Click="@Cancel" />
+    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem">
+        @if (wizardStep > 0)
+        {
+            <RadzenButton Text="Back" Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Click="@Back" />
+        }
+        @if (wizardStep < 2)
+        {
+            <RadzenButton Text="Next" Icon="arrow_forward" ButtonStyle="ButtonStyle.Primary" Click="@Next" />
+        }
+        else
+        {
+            @* <RadzenButton Text="Save draft" Icon="save" ButtonStyle="ButtonStyle.Secondary" Click="@SaveDraft"
+                          Disabled="@HasComponents" /> *@
+            <RadzenButton Text="Save" Icon="save" ButtonStyle="ButtonStyle.Success" Click="@Save" Disabled="@(!CanSave)" />
+        }
+    </RadzenStack>
+</RadzenStack>
+
+@code {
+    private int wizardStep;
+    private record ComponentSelectorItem(int Id, string Name, int componentTypeId, int Quantity);
+    private Order newOrder = new()
+    {
+        OrderDate = DateTime.Now
+    };
+
+
+    private IList<Board> boards = new List<Board>();
+    private IList<ComponentSelectorItem> selectorComponents = new List<ComponentSelectorItem>();
+
+    private IList<Board> selectedBoards = new List<Board>();
+    private record SelectedBoardInstance(int InstanceId, Board Board)
+    {
+        public string Name => Board.Name;
+    }
+    private IList<SelectedBoardInstance> selectedBoardInstances = new List<SelectedBoardInstance>();
+    private readonly Dictionary<int, IList<ComponentSelectorItem>> componentsByBoardInstance = new();
+    private int selectedBoardInstanceId;
+
+    private IList<ComponentSelectorItem> SelectedComponentsForBoard
+    {
+        get => selectedBoardInstanceId > 0 && componentsByBoardInstance.TryGetValue(selectedBoardInstanceId, out var components) ? components : [];
+        set
+        {
+            if (selectedBoardInstanceId > 0)
+            {
+                componentsByBoardInstance[selectedBoardInstanceId] = value;
+            }
+        }
+    }
+
+    private bool HasComponents => componentsByBoardInstance.Values.Any(components => components.Count > 0);
+    private bool CanSave => selectedBoardInstances.Any() && selectedBoardInstances.All(board =>
+        componentsByBoardInstance.TryGetValue(board.InstanceId, out var components) && components.Count > 0);
+
+    private void OnBoardsChanged(IList<Board> boards)
+    {
+        var previousInstances = selectedBoardInstances.ToList();
+        var usedInstanceIds = new HashSet<int>();
+        var nextInstanceId = previousInstances.Select(board => board.InstanceId).DefaultIfEmpty(0).Max() + 1;
+
+        selectedBoards = boards;
+        selectedBoardInstances = boards.Select(board =>
+        {
+            var existingInstance = previousInstances.FirstOrDefault(previous =>
+                !usedInstanceIds.Contains(previous.InstanceId) && previous.Board.Id == board.Id);
+
+            if (existingInstance is not null)
+            {
+                usedInstanceIds.Add(existingInstance.InstanceId);
+                return existingInstance;
+            }
+
+            return new SelectedBoardInstance(nextInstanceId++, board);
+        }).ToList();
+
+        var activeInstanceIds = selectedBoardInstances.Select(board => board.InstanceId).ToHashSet();
+        foreach (var instanceId in componentsByBoardInstance.Keys.Except(activeInstanceIds).ToList())
+        {
+            componentsByBoardInstance.Remove(instanceId);
+        }
+
+        if (!activeInstanceIds.Contains(selectedBoardInstanceId))
+        {
+            selectedBoardInstanceId = selectedBoardInstances.FirstOrDefault()?.InstanceId ?? 0;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            boards = await http.GetFromJsonAsync<List<Board>>("boards") ?? [];
+            var componentResponse = await http.GetFromJsonAsync<List<ComponentResponse>>("components") ?? [];
+            selectorComponents = componentResponse
+                .Select(component => new ComponentSelectorItem(
+                    component.Id,
+                    component.ComponentType.Name,
+                    component.ComponentType.Id,
+                    component.Quantity))
+                .ToList();
+        }
+        catch (Exception exception)
+        {
+            await ExceptionHandler.HandleAsync(exception, "Orders", "load boards and components");
+        }
+    }
+
+    private int AvailableQuantity(int componentId)
+    {
+        var stock = selectorComponents.First(component => component.Id == componentId).Quantity;
+        var assigned = componentsByBoardInstance.Values.SelectMany(components => components)
+            .Where(component => component.Id == componentId)
+            .Sum(component => component.Quantity);
+        return Math.Max(0, stock - assigned);
+    }
+
+    private void Next()
+    {
+        if (wizardStep < 2)
+        {
+            if (wizardStep == 1 && selectedBoardInstanceId == 0)
+            {
+                selectedBoardInstanceId = selectedBoardInstances.FirstOrDefault()?.InstanceId ?? 0;
+            }
+            wizardStep++;
+        }
+    }
+
+    private void Back()
+    {
+        if (wizardStep > 0)
+        {
+            wizardStep--;
+        }
+    }
+
+    private void Cancel()
+    {
+        DialogService.Close();
+    }
+
+    private async Task SaveDraft() => await PersistOrder();
+
+    private async Task Save() => await PersistOrder();
+
+    private async Task PersistOrder()
+    {
+        try
+        {
+            var createOrderRequest = new CreateOrderRequest(
+                newOrder.Name,
+                newOrder.Description,
+                newOrder.OrderDate,
+                selectedBoardInstances.Select(board => new CreateOrderBoardRequest(
+                    board.Board.Id,
+                    componentsByBoardInstance.TryGetValue(board.InstanceId, out var components)
+                        ? components.Select(component => new CreateOrderBoardComponentRequest(
+                            component.Id,
+                            component.Quantity)).ToList()
+                        : [])).ToList());
+
+            var orderResponse = await http.PostAsJsonAsync("orders", createOrderRequest);
+            orderResponse.EnsureSuccessStatusCode();
+            var savedOrder = await orderResponse.Content.ReadFromJsonAsync<Order>() ?? newOrder;
+
+            DialogService.Close(savedOrder);
+        }
+        catch (Exception exception)
+        {
+            await ExceptionHandler.HandleAsync(exception, "Orders", "save order");
+        }
+    }
+}
